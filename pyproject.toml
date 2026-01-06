@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pygenguard"
-version = "0.1.0"
+version = "0.2.0"
 description = "Runtime security and governance framework for GenAI systems"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -19,7 +19,9 @@ keywords = [
     "guardrails",
     "trust",
     "compliance",
-    "audit"
+    "audit",
+    "async",
+    "plugins"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -33,19 +35,30 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Typing :: Typed"
+    "Typing :: Typed",
+    "Framework :: AsyncIO"
 ]
 
-# ZERO heavy dependencies - pure Python
+# ZERO heavy dependencies - pure Python core
 dependencies = []
 
 [project.optional-dependencies]
+# Redis adapter for distributed sessions
+redis = [
+    "redis>=4.2.0"
+]
+# Full development dependencies
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21.0",
     "black>=23.0",
     "mypy>=1.0",
     "ruff>=0.1.0"
+]
+# All optional features
+all = [
+    "redis>=4.2.0"
 ]
 
 [project.urls]
@@ -62,6 +75,7 @@ include = ["pygenguard*"]
 testpaths = ["tests"]
 python_files = "test_*.py"
 addopts = "-v --tb=short"
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 88

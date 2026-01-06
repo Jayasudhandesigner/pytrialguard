@@ -4,6 +4,18 @@
 
 PyGenGuard enforces trust, intent, cost, and compliance policies **before and after** model execution. It sits between your application and the LLM, acting as a deterministic security layer.
 
+[![PyPI version](https://badge.fury.io/py/pygenguard.svg)](https://badge.fury.io/py/pygenguard)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
+
+---
+
+## What's New in v0.2.0 🚀
+
+- **Plugin System**: Create custom security planes with the `BasePlane` abstract class
+- **Async Support**: `AsyncGuard` for high-concurrency applications (FastAPI, aiohttp)
+- **Redis Adapters**: Distributed session storage for multi-instance deployments
+
 ---
 
 ## What problem does this solve?
@@ -33,6 +45,7 @@ PyGenGuard blocks these threats with **deterministic, offline-capable** checks.
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ │
 │  │ Identity │→│  Intent  │→│ Context  │→│Economics │→│Comply  │ │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └────────┘ │
+│                     ↑ Custom Plugins ↑                          │
 └─────────────────────────────────────────────────────────────────┘
                               │
                     ┌─────────┴─────────┐
@@ -53,12 +66,19 @@ PyGenGuard blocks these threats with **deterministic, offline-capable** checks.
 pip install pygenguard
 ```
 
+**With Redis support:**
+```bash
+pip install pygenguard[redis]
+```
+
 **Requirements**: Python 3.9+  
-**Dependencies**: None (pure Python stdlib)
+**Core Dependencies**: None (pure Python stdlib)
 
 ---
 
 ## Quickstart (5 minutes)
+
+### Basic Usage (Sync)
 
 ```python
 from pygenguard import Guard, Session
@@ -87,20 +107,39 @@ else:
     # decision.rationale contains the reason
 ```
 
+### Async Usage (v0.2.0+) ⚡
+
+```python
+from pygenguard import AsyncGuard, Session
+
+# Create async guard
+guard = AsyncGuard(mode="balanced")
+
+async def process_chat(user_input: str, user_id: str):
+    session = Session.create(user_id=user_id)
+    
+    # Non-blocking inspection
+    decision = await guard.inspect(user_input, session)
+    
+    if decision.allowed:
+        return await call_llm_async(user_input)
+    return decision.safe_response
+```
+
 ### With FastAPI
 
 ```python
 from fastapi import FastAPI, Request
-from pygenguard import Guard, Session
+from pygenguard import AsyncGuard, Session
 
 app = FastAPI()
-guard = Guard(mode="strict")
+guard = AsyncGuard(mode="strict")
 
 @app.post("/chat")
 async def chat(request: Request, body: ChatRequest):
     session = Session.from_request(request, user_id=body.user_id)
     
-    decision = guard.inspect(body.prompt, session)
+    decision = await guard.inspect(body.prompt, session)
     
     if not decision.allowed:
         return {"response": decision.safe_response, "blocked": True}
@@ -116,12 +155,112 @@ async def chat(request: Request, body: ChatRequest):
 PyGenGuard evaluates every request through 5 security planes (in order):
 
 | Plane | Purpose | Blocks On |
-|-------|---------|-----------|
+|-------|---------|-----------| 
 | **Identity** | Session fingerprint + trust scoring | Fingerprint drift, low trust score |
 | **Intent** | Cognitive threat detection | Privilege escalation, coercion, authority spoofing |
 | **Context** | Multi-turn attack detection | Split payloads, instruction poisoning |
 | **Economics** | Token burn-rate limiting | Denial-of-wallet patterns |
 | **Compliance** | PII detection + audit logging | Never blocks, only annotates |
+
+### How IP Address Fingerprinting Works
+
+The **Identity Plane** creates a cryptographic fingerprint from:
+- **IP Address** + **User-Agent** + **TLS Fingerprint**
+
+If this fingerprint changes between requests (e.g., user switches networks or VPN), the trust score drops by 50 points. This detects:
+- Session hijacking attempts
+- Credential theft
+- Man-in-the-middle attacks
+
+---
+
+## Plugin System (v0.2.0+) 🔌
+
+Create custom security planes that integrate with the pipeline:
+
+```python
+from pygenguard.plugins import BasePlane, PlaneConfig, PlanePhase
+from pygenguard.decision import PlaneResult
+
+class ProfanityFilterPlane(BasePlane):
+    """Custom plane that blocks profanity."""
+    
+    BLOCKED_WORDS = {"badword1", "badword2"}
+    
+    @classmethod
+    def get_config(cls) -> PlaneConfig:
+        return PlaneConfig(
+            name="profanity_filter",
+            phase=PlanePhase.POST_INTENT,  # Runs after intent analysis
+            priority=10
+        )
+    
+    def evaluate(self, prompt, session, context=None) -> PlaneResult:
+        words = set(prompt.lower().split())
+        found = words & self.BLOCKED_WORDS
+        
+        if found:
+            return PlaneResult(
+                plane_name="profanity_filter",
+                passed=False,
+                risk_score=0.8,
+                details=f"Blocked words: {found}",
+                latency_ms=0.1
+            )
+        
+        return PlaneResult(
+            plane_name="profanity_filter",
+            passed=True,
+            risk_score=0.0,
+            details="Clean",
+            latency_ms=0.1
+        )
+
+# Register with AsyncGuard
+guard = AsyncGuard(mode="balanced")
+guard.register_plugin(ProfanityFilterPlane)
+```
+
+### Plugin Execution Phases
+
+| Phase | When it runs |
+|-------|-------------|
+| `PRE_IDENTITY` | Before any built-in planes |
+| `POST_IDENTITY` | After identity, before intent |
+| `POST_INTENT` | After intent, before context |
+| `POST_CONTEXT` | After context, before economics |
+| `POST_ECONOMICS` | After economics, before compliance |
+| `POST_COMPLIANCE` | After all built-in planes |
+
+---
+
+## Redis Session Store (v0.2.0+) 🗄️
+
+For distributed deployments, use Redis to share session state:
+
+```python
+from pygenguard.adapters import RedisSessionStore
+
+# Connect to Redis
+store = RedisSessionStore(
+    redis_url="redis://localhost:6379/0",
+    key_prefix="myapp:sessions:",
+    default_ttl=86400  # 24 hours
+)
+
+# Session data is now shared across all instances
+```
+
+### Async Redis Store
+
+```python
+from pygenguard.adapters import AsyncRedisSessionStore
+
+store = AsyncRedisSessionStore("redis://localhost:6379/0")
+
+# Use with AsyncGuard
+session_data = await store.get("user_123")
+```
 
 ---
 
@@ -167,16 +306,6 @@ decision.to_dict()        # JSON-serializable for logging
 
 ---
 
-## What PyGenGuard Does NOT Do
-
-- ❌ **No ML model inference** — All checks are rule-based and deterministic
-- ❌ **No network calls** — Works fully offline
-- ❌ **No content generation** — Only inspection and blocking
-- ❌ **No output filtering** — v0.1 is input-only (output guards in v0.3)
-- ❌ **No multimodal** — Text-only in v0.1 (image/audio in v0.3)
-
----
-
 ## Audit Logging
 
 Every decision is logged as structured JSON:
@@ -202,6 +331,15 @@ Every decision is logged as structured JSON:
 
 ---
 
+## What PyGenGuard Does NOT Do
+
+- ❌ **No ML model inference** — All checks are rule-based and deterministic
+- ❌ **No network calls** — Works fully offline
+- ❌ **No content generation** — Only inspection and blocking
+- ❌ **No output filtering** — v0.2 is input-only (output guards in v0.3)
+
+---
+
 ## License
 
 Apache 2.0 — Enterprise-safe, permissive, no patent traps.
@@ -216,6 +354,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Roadmap
 
-- **v0.1.0** (Current): Core security planes, text-only
-- **v0.2.0**: Plugin system, async support, Redis adapters
-- **v0.3.0**: Multimodal guards (image, audio)
+- **v0.1.0**: Core security planes, text-only
+- **v0.2.0** (Current): Plugin system, async support, Redis adapters
+- **v0.3.0**: Multimodal guards (image, audio), output filtering
+- **v0.4.0**: OpenTelemetry tracing, Prometheus metrics
