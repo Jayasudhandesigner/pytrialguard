@@ -49,10 +49,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/trialguard/trialguard"
-Documentation = "https://github.com/trialguard/trialguard#readme"
-Repository = "https://github.com/trialguard/trialguard"
-Issues = "https://github.com/trialguard/trialguard/issues"
+Homepage = "https://github.com/Jayasudhandesigner/pytrialguard"
+Documentation = "https://github.com/Jayasudhandesigner/pytrialguard#readme"
+Repository = "https://github.com/Jayasudhandesigner/pytrialguard"
+Issues = "https://github.com/Jayasudhandesigner/pytrialguard/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
